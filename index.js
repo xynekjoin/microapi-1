@@ -1,99 +1,81 @@
 const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
+const axios   = require('axios');
+const cors    = require('cors');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
+const app  = express();
 app.use(cors());
 app.use(express.json());
 
+const PORT = process.env.PORT || 8080;
+
+// --- config roblox ---
 const ROBLOX_API_BASE = 'https://games.roblox.com/v1/games';
-const MAX_SERVERS = 100;
-const PLACE_ID = 109983668079237
+const PLACE_ID        = 109983668079237; // tu place
+const MAX_SERVERS     = 100;             // por página
 
 async function getRobloxServers(placeId, cursor = '') {
-    try {
-        const url = `${ROBLOX_API_BASE}/${placeId}/servers/Public`;
-        const params = {
-            limit: MAX_SERVERS,
-            sortOrder: 'Des',
-            cursor: cursor || undefined,
-            excludeFullGames: true
-        };
+  const url = `${ROBLOX_API_BASE}/${placeId}/servers/Public`;
+  const params = {
+    limit: MAX_SERVERS,
+    sortOrder: 'Desc',
+    excludeFullGames: true,
+    cursor: cursor || undefined
+  };
+  // borro keys undefined
+  Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
 
-        Object.keys(params).forEach(key => params[key] === undefined && delete params[key]);
-
-        const response = await axios.get(url, {
-            params,
-            timeout: 10000,
-            headers: {
-                'User-Agent': 'Roblox-Servers-MicroAPI/1.0',
-                'Accept': 'application/json'
-            }
-        });
-
-        return response.data;
-    } catch (error) {
-        console.error('Error fetching Roblox servers:', error.message);
-        throw new Error(`Failed to fetch servers: ${error.response?.data?.message || error.message}`);
+  const { data } = await axios.get(url, {
+    params,
+    timeout: 15000,
+    headers: {
+      'User-Agent': 'Roblox-Servers-MicroAPI/1.0',
+      'Accept': 'application/json'
     }
+  });
+
+  return data; // la respuesta oficial de Roblox
 }
 
+// raíz con info
 app.get('/', (req, res) => {
-    res.json({
-        message: 'Roblox Servers MicroAPI',
-        endpoints: {
-            getServers: 'GET /servers/:placeId',
-            health: 'GET /health'
-        },
-        documentation: 'Use /servers/:placeId para obtener servidores de un place específico'
-    });
+  res.json({
+    ok: true,
+    name: 'roblox-microapi',
+    placeId: PLACE_ID,
+    endpoints: ['/health','/servers']
+  });
 });
 
-// Ruta de health check
+// health
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-    });
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
+// endpoint /servers
 app.get('/servers', async (req, res) => {
-    const { cursor } = req.query;
-
-    try {
-        console.log(`Fetching servers...`);
-        const serversData = await getRobloxServers(PLACE_ID, cursor);
-        res.json({
-            success: true,
-            data: serversData,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error(`Error for place ${placeId}:`, error.message);
-
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            placeId: parseInt(placeId),
-            timestamp: new Date().toISOString()
-        });
-    }
-});
-
-app.use('*', (req, res) => {
-    res.status(404).json({
-        error: 'Endpoint not found',
-        message: 'Check the documentation at the root endpoint'
+  try {
+    const cursor = req.query.cursor || '';
+    const serversData = await getRobloxServers(PLACE_ID, cursor);
+    // Devuelvo exactamente lo que espera la API principal:
+    res.json({
+      success: true,
+      data: serversData,
+      timestamp: new Date().toISOString()
     });
+  } catch (e) {
+    res.status(500).json({
+      success: false,
+      error: e.message || String(e),
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Roblox Servers MicroAPI running on port ${PORT}`);
-    console.log(`📚 Documentation: http://localhost:${PORT}`);
-});
+// 404
+app.use('*', (_req, res) => res.status(404).json({ ok:false, error:'Not found' }));
 
-module.exports = app;
+app.listen(PORT, () => console.log(`🚀 MicroAPI listening on ${PORT}`));
