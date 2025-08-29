@@ -8,10 +8,12 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
+// === CONFIG ===
 const ROBLOX_API_BASE = 'https://games.roblox.com/v1/games';
 const MAX_SERVERS     = 100;
 const PLACE_ID        = 109983668079237;
 
+// pequeño helper
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function getRobloxServers(placeId, cursor = '') {
@@ -31,32 +33,34 @@ async function getRobloxServers(placeId, cursor = '') {
         params,
         timeout: 15000,
         headers: {
-          'User-Agent': 'Roblox-Servers-MicroAPI/1.0',
+          'User-Agent': 'Roblox-Servers-MicroAPI/1.1',
           'Accept': 'application/json'
         }
       });
 
-      const resData = response.data;
-      if (resData && Array.isArray(resData.data)) {
-        resData.data = resData.data.filter(s =>
-          Number(s.playing || 0) <= 7 && Number(s.playing || 0) < Number(s.maxPlayers || 8)
-        );
+      // 🔥 Filtro duro: SOLO servers con 6 jugadores o menos
+      if (response.data && Array.isArray(response.data.data)) {
+        response.data.data = response.data.data.filter(s => {
+          return s && typeof s.playing === 'number' && typeof s.maxPlayers === 'number'
+                 && s.id && s.playing <= 6; // <= 6 jugadores
+        });
       }
-      return resData;
+
+      return response.data; // { data:[...], nextPageCursor: '...' }
     } catch (err) {
       const status = err.response?.status;
-      const retriable =
-        status === 429 || status >= 500 || err.code === 'ECONNABORTED';
-
+      const retriable = (status === 429 || status >= 500 || err.code === 'ECONNABORTED');
       if (retriable && attempt < 4) {
-        await sleep(400 * attempt);
+        await sleep(500 * attempt);
         continue;
       }
+      console.error('MicroAPI error:', status || err.message);
       throw err;
     }
   }
 }
 
+// Home
 app.get('/', (_, res) => {
   res.json({
     ok: true,
@@ -66,6 +70,7 @@ app.get('/', (_, res) => {
   });
 });
 
+// Health
 app.get('/health', (_, res) => {
   res.json({
     status: 'healthy',
@@ -74,20 +79,15 @@ app.get('/health', (_, res) => {
   });
 });
 
+// Página (con cursor) ya filtrada a <=6 jugadores
 app.get('/servers', async (req, res) => {
   try {
     const cursor     = req.query.cursor || '';
     const serversRes = await getRobloxServers(PLACE_ID, cursor);
 
-    if (serversRes && Array.isArray(serversRes.data)) {
-      serversRes.data = serversRes.data.filter(s =>
-        Number(s.playing || 0) <= 7 && Number(s.playing || 0) < Number(s.maxPlayers || 8)
-      );
-    }
-
     res.json({
       success: true,
-      data: serversRes,
+      data: serversRes, // { data:[ solo <=6 ], nextPageCursor }
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -99,4 +99,7 @@ app.get('/servers', async (req, res) => {
 });
 
 app.use('*', (_, res) => res.status(404).json({ error: 'Not found' }));
-app.listen(PORT, () => console.log(`MicroAPI listening on ${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`🚀 MicroAPI listening on ${PORT}`);
+});
